@@ -1,16 +1,48 @@
 import typer
 from rich import print
-from pathlib import Path
+from rich.syntax import Syntax
+from rich.panel import Panel
+import requests
 from dotenv import load_dotenv
 import os
-import requests
-import json
 import subprocess
+import shlex
 import re
+import pathlib
+import logging
+import sys
+import io # Added for redirecting stdout/stderr
+import threading # Added for running commands in background
+import customtkinter # Added for GUI
+from typing import Optional, List # Added for type hints
+
+# --- Début des modifications pour PyInstaller ---
+def get_base_path():
+    # Détermine le chemin de base pour les ressources
+    if getattr(sys, 'frozen', False):
+        # Si l'application est "gelée" (exécutée via PyInstaller)
+        return sys._MEIPASS
+    else:
+        # Sinon (exécutée comme un script normal)
+        return os.path.dirname(os.path.abspath(__file__))
+
+base_path = get_base_path()
+dotenv_path = os.path.join(base_path, '.env')
+
+# Afficher les informations de débogage
+print(f"[DEBUG] Répertoire de travail actuel (CWD): {os.getcwd()}")
+print(f"[DEBUG] Chemin de base détecté: {base_path}")
+print(f"[DEBUG] Tentative de chargement de .env depuis: {dotenv_path}")
+
+# Charger .env depuis le chemin correct
+if os.path.exists(dotenv_path):
+    load_dotenv(dotenv_path=dotenv_path)
+    print("[DEBUG] Fichier .env chargé.")
+else:
+    print("[DEBUG] Fichier .env non trouvé au chemin attendu.")
+# --- Fin des modifications pour PyInstaller ---
 
 app = typer.Typer()
-load_dotenv()
-
 
 OLLAMA_API_URL = "http://localhost:11434/api/generate"
 
@@ -49,6 +81,9 @@ def execute_command(command: str):
     Exécute une commande système
     """
     try:
+        # Nettoyer la commande des backticks
+        command = command.strip('`')
+        
         # Vérifier si la commande nécessite des droits d'administration
         if any(cmd in command.lower() for cmd in ['apt install', 'dnf install', 'yum install']):
             command = f"sudo {command}"
@@ -262,5 +297,187 @@ def list_models():
     except Exception as e:
         print(f"[bold red]Erreur:[/bold red] {str(e)}")
 
+# --- Classes for GUI ---
+
+class OutputRedirector(io.StringIO):
+    def __init__(self, text_widget):
+        super().__init__()
+        self.text_widget = text_widget
+
+    def write(self, string):
+        # Assurez-vous que les mises à jour du widget se font dans le thread principal
+        self.text_widget.after(0, self._write_to_widget, string)
+
+    def _write_to_widget(self, string):
+        self.text_widget.configure(state="normal")
+        self.text_widget.insert("end", string)
+        self.text_widget.see("end")
+        self.text_widget.configure(state="disabled")
+
+    def flush(self):
+        # Tkinter Text widget n'a pas besoin de flush explicite
+        pass
+
+class App(customtkinter.CTk):
+    def __init__(self):
+        super().__init__()
+
+        self.title("WhizTerm")
+        self.geometry("800x600")
+        customtkinter.set_appearance_mode("dark")
+        customtkinter.set_default_color_theme("blue")
+
+        # Garder une trace du répertoire de travail courant
+        self.current_directory = os.getcwd()
+
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+
+        # Zone de texte pour la sortie
+        self.output_textbox = customtkinter.CTkTextbox(self, state="disabled", wrap="word")
+        self.output_textbox.grid(row=0, column=0, padx=10, pady=(10, 0), sticky="nsew")
+
+        # Champ de saisie pour les commandes
+        self.input_entry = customtkinter.CTkEntry(self, placeholder_text="Entrez votre commande ici...")
+        self.input_entry.grid(row=1, column=0, padx=10, pady=10, sticky="ew")
+        self.input_entry.bind("<Return>", self.process_gui_command)
+
+        # Redirection stdout/stderr
+        self.redirector = OutputRedirector(self.output_textbox)
+        sys.stdout = self.redirector
+        sys.stderr = self.redirector
+        
+        print("[bold cyan]Bienvenue dans WhizTerm.[/bold cyan]")
+        print("Entrez votre commande ci-dessous et appuyez sur Entrée.")
+
+    def is_shell_command(self, command: str) -> bool:
+        """
+        Vérifie si la commande est une commande shell directe
+        """
+        shell_commands = {'ls', 'cd', 'pwd', 'mkdir', 'rm', 'cp', 'mv', 'cat', 'echo', 'grep'}
+        first_word = command.strip().split()[0]
+        return first_word in shell_commands or '/' in command or '.' in command
+
+    def execute_shell_command(self, command: str):
+        """
+        Exécute une commande shell en tenant compte du répertoire courant
+        """
+        try:
+            # Gérer la commande cd séparément car elle affecte l'état
+            if command.startswith('cd'):
+                new_dir = command[2:].strip()
+                if not new_dir:
+                    new_dir = os.path.expanduser('~')
+                
+                # Gérer les chemins relatifs et absolus
+                if not os.path.isabs(new_dir):
+                    new_dir = os.path.join(self.current_directory, new_dir)
+                
+                # Vérifier si le répertoire existe
+                if os.path.isdir(new_dir):
+                    self.current_directory = os.path.abspath(new_dir)
+                    os.chdir(self.current_directory)
+                    print(f"Répertoire courant : {self.current_directory}")
+                else:
+                    print(f"Erreur : Le répertoire {new_dir} n'existe pas")
+                return
+
+            # Pour les autres commandes
+            result = subprocess.run(
+                command,
+                shell=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                cwd=self.current_directory
+            )
+
+            if result.stdout:
+                print(result.stdout.rstrip())
+            if result.stderr:
+                print(f"Erreur : {result.stderr.rstrip()}")
+
+        except Exception as e:
+            print(f"Erreur lors de l'exécution de la commande : {str(e)}")
+
+    def process_gui_command(self, event=None):
+        command_input = self.input_entry.get()
+        self.input_entry.delete(0, "end")  # Efface le champ après envoi
+        print(f"> {command_input}")  # Affiche la commande entrée
+        
+        if command_input.lower() == 'quitter':
+            self.quit()
+            return
+
+        # Vérifier si c'est une commande shell directe
+        if self.is_shell_command(command_input):
+            self.execute_shell_command(command_input)
+        else:
+            # Sinon, traiter comme une requête pour l'IA
+            thread = threading.Thread(target=self.run_command_logic, args=(command_input,), daemon=True)
+            thread.start()
+
+    def run_command_logic(self, command_input):
+        try:
+            if command_input.strip():
+                # Traiter comme une commande AI par défaut
+                process_command(command=command_input, model="mistral")
+        except Exception as e:
+            print(f"[bold red]Erreur lors du traitement de la commande:[/bold red] {str(e)}")
+
+def interactive_mode():
+    # Cette fonction n'est plus utilisée pour l'application GUI principale
+    print("[bold cyan]Bienvenue dans le mode interactif de WhizTerm.[/bold cyan]")
+    print("Entrez 'quitter' pour sortir.")
+    while True:
+        command_input = input("> ")
+        if command_input.lower() == 'quitter':
+            break
+        try:
+            # Simuler l'appel Typer. On pourrait rendre ça plus robuste
+            # mais pour un début, on assume que l'utilisateur entre 'process-command <sa commande>'
+            # ou une autre commande valide de WhizTerm.
+            # Attention: ne gère pas les options comme --model pour l'instant.
+            if command_input.strip():
+                # Diviser l'entrée en commande et arguments
+                parts = command_input.split(maxsplit=1)
+                cmd_name = parts[0]
+                args = parts[1] if len(parts) > 1 else ""
+                
+                # Trouver la fonction Typer correspondante
+                typer_command = None
+                for command_info in app.registered_commands:
+                    if command_info.name == cmd_name:
+                        typer_command = command_info.callback
+                        break
+                
+                if typer_command:
+                    # Ici, on appelle directement la fonction. 
+                    # Pour process_command, il faut passer l'argument 'command'.
+                    # Pour d'autres, il faut adapter.
+                    if cmd_name == 'process-command':
+                        process_command(command=args, model="mistral") 
+                    elif cmd_name == 'search-files':
+                        search_files(query=args)
+                    elif cmd_name == 'list-models':
+                        list_models()
+                    else:
+                        print(f"[bold red]Commande Typer non gérée en mode interactif: {cmd_name}[/bold red]")
+                else:
+                    # Si ce n'est pas une commande Typer, on tente de la traiter comme une commande AI
+                    process_command(command=command_input, model="mistral")
+            
+        except Exception as e:
+            print(f"[bold red]Erreur en mode interactif:[/bold red] {str(e)}")
+
 if __name__ == "__main__":
-    app()
+    # Lancer l'application GUI
+    gui_app = App()
+    gui_app.mainloop()
+    
+    # L'ancien code pour Typer ou le mode interactif n'est plus utilisé ici
+    # if len(sys.argv) <= 1:
+    #     interactive_mode()
+    # else:
+    #     # Sinon, laisser Typer gérer les arguments comme d'habitude
+    #     app()

@@ -1,0 +1,7 @@
+typer>=0.9.0
+rich>=13.0.0
+python-dotenv>=1.0.0
+requests>=2.31.0
+pyinstaller>=6.3.0
+py2app>=0.28
+customtkinter>=5.2.0
