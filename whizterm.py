@@ -324,39 +324,74 @@ class App(customtkinter.CTk):
 
         self.title("WhizTerm")
         self.geometry("800x600")
+        
+        # Configuration du thème sombre
         customtkinter.set_appearance_mode("dark")
         customtkinter.set_default_color_theme("blue")
+        
+        # Définir la couleur de fond en noir
+        self.configure(fg_color="black")
 
         # Garder une trace du répertoire de travail courant
         self.current_directory = os.getcwd()
 
+        # Ajouter le chemin de Homebrew au PATH
+        homebrew_path = "/opt/homebrew/bin"
+        if os.path.exists(homebrew_path):
+            os.environ["PATH"] = f"{homebrew_path}:{os.environ['PATH']}"
+
         self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(0, weight=1)
+        self.grid_rowconfigure(1, weight=1)  # La zone de texte principale prend plus d'espace
 
-        # Zone de texte pour la sortie
-        self.output_textbox = customtkinter.CTkTextbox(self, state="disabled", wrap="word")
-        self.output_textbox.grid(row=0, column=0, padx=10, pady=(10, 0), sticky="nsew")
+        # Frame pour la zone de saisie en haut
+        self.input_frame = customtkinter.CTkFrame(self, fg_color="black", corner_radius=0)
+        self.input_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 0))
+        self.input_frame.grid_columnconfigure(1, weight=1)
 
-        # Champ de saisie pour les commandes
-        self.input_entry = customtkinter.CTkEntry(self, placeholder_text="Entrez votre commande ici...")
-        self.input_entry.grid(row=1, column=0, padx=10, pady=10, sticky="ew")
+        # Prompt du terminal (peut afficher le répertoire courant)
+        self.prompt_label = customtkinter.CTkLabel(
+            self.input_frame,
+            text="$ ",
+            text_color="lime green",
+            font=("Courier", 14)
+        )
+        self.prompt_label.grid(row=0, column=0, padx=(5, 0))
+
+        # Champ de saisie pour les commandes (en haut)
+        self.input_entry = customtkinter.CTkEntry(
+            self.input_frame,
+            placeholder_text="run commands...",
+            border_width=0,
+            fg_color="black",
+            text_color="white",
+            font=("Courier", 14)
+        )
+        self.input_entry.grid(row=0, column=1, sticky="ew", padx=5)
         self.input_entry.bind("<Return>", self.process_gui_command)
+
+        # Zone de texte pour la sortie (occupe le reste de l'espace)
+        self.output_textbox = customtkinter.CTkTextbox(
+            self,
+            state="disabled",
+            wrap="word",
+            fg_color="black",
+            text_color="white",
+            font=("Courier", 12)
+        )
+        self.output_textbox.grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
 
         # Redirection stdout/stderr
         self.redirector = OutputRedirector(self.output_textbox)
         sys.stdout = self.redirector
         sys.stderr = self.redirector
         
-        print("[bold cyan]Bienvenue dans WhizTerm.[/bold cyan]")
-        print("Entrez votre commande ci-dessous et appuyez sur Entrée.")
+        # Message de bienvenue
+        # print("[bold cyan]Bienvenue dans WhizTerm.[/bold cyan]")
 
-    def is_shell_command(self, command: str) -> bool:
-        """
-        Vérifie si la commande est une commande shell directe
-        """
-        shell_commands = {'ls', 'cd', 'pwd', 'mkdir', 'rm', 'cp', 'mv', 'cat', 'echo', 'grep'}
-        first_word = command.strip().split()[0]
-        return first_word in shell_commands or '/' in command or '.' in command
+    def update_prompt(self):
+        """Met à jour le prompt avec le répertoire courant"""
+        current_dir = os.path.basename(self.current_directory) or '/'
+        self.prompt_label.configure(text=f"{current_dir} $ ")
 
     def execute_shell_command(self, command: str):
         """
@@ -377,6 +412,7 @@ class App(customtkinter.CTk):
                 if os.path.isdir(new_dir):
                     self.current_directory = os.path.abspath(new_dir)
                     os.chdir(self.current_directory)
+                    self.update_prompt()  # Mettre à jour le prompt
                     print(f"Répertoire courant : {self.current_directory}")
                 else:
                     print(f"Erreur : Le répertoire {new_dir} n'existe pas")
@@ -401,29 +437,129 @@ class App(customtkinter.CTk):
             print(f"Erreur lors de l'exécution de la commande : {str(e)}")
 
     def process_gui_command(self, event=None):
-        command_input = self.input_entry.get()
-        self.input_entry.delete(0, "end")  # Efface le champ après envoi
-        print(f"> {command_input}")  # Affiche la commande entrée
-        
-        if command_input.lower() == 'quitter':
-            self.quit()
+        """Traite la commande entrée dans l'interface graphique"""
+        command = self.input_entry.get().strip()
+        if not command:
             return
 
-        # Vérifier si c'est une commande shell directe
-        if self.is_shell_command(command_input):
-            self.execute_shell_command(command_input)
-        else:
-            # Sinon, traiter comme une requête pour l'IA
-            thread = threading.Thread(target=self.run_command_logic, args=(command_input,), daemon=True)
-            thread.start()
+        # Effacer le champ de saisie
+        self.input_entry.delete(0, "end")
 
-    def run_command_logic(self, command_input):
+        # Afficher la commande entrée
+        print(f"> {command}")
+
         try:
-            if command_input.strip():
-                # Traiter comme une commande AI par défaut
-                process_command(command=command_input, model="mistral")
+            # Vérifier si c'est une salutation
+            if self.is_greeting(command):
+                print(f"AI: {self.get_greeting_response(command)}")
+                return
+
+            # Vérifier si c'est une commande shell directe
+            if self.is_shell_command(command):
+                self.execute_shell_command(command)
+                return
+
+            # Sinon, traiter comme une requête à l'IA
+            response = self.ask_ai(command)
+            
+            # Extraire et exécuter les commandes de la réponse
+            commands = self.extract_commands(response)
+            if commands:
+                for cmd in commands:
+                    self.execute_command(cmd)
+            else:
+                # Si pas de commande, afficher juste la réponse de l'IA
+                print(f"AI: {response}")
+
         except Exception as e:
-            print(f"[bold red]Erreur lors du traitement de la commande:[/bold red] {str(e)}")
+            print(f"Erreur: {str(e)}")
+
+    def execute_command(self, command: str):
+        """Exécute une commande et affiche le résultat"""
+        try:
+            # Nettoyer la commande des backticks
+            command = command.strip('`')
+            
+            # Vérifier si la commande nécessite des droits administrateur
+            if any(cmd in command.lower() for cmd in ['sudo', 'brew']):
+                command = command.replace('sudo ', '')
+            
+            # Exécuter la commande
+            result = subprocess.run(
+                command,
+                shell=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+
+            # Afficher le résultat
+            if result.stdout:
+                print(result.stdout.rstrip())
+            if result.stderr:
+                print(f"Erreur: {result.stderr.rstrip()}")
+            elif not result.stdout and not result.stderr:
+                print("Succès")
+
+        except Exception as e:
+            print(f"Erreur: {str(e)}")
+
+    def is_shell_command(self, command: str) -> bool:
+        """
+        Vérifie si la commande est une commande shell directe
+        """
+        shell_commands = {'ls', 'cd', 'pwd', 'mkdir', 'rm', 'cp', 'mv', 'cat', 'echo', 'grep'}
+        first_word = command.strip().split()[0]
+        return first_word in shell_commands or '/' in command or '.' in command
+
+    def ask_ai(self, prompt: str) -> str:
+        """Envoie une requête à l'API Ollama et retourne la réponse"""
+        try:
+            system_prompt = """Tu es un assistant concis pour macOS.
+            - Réponds en une seule phrase courte
+            - Pour installer des applications sur macOS, utilise uniquement 'brew install --cask'
+            - Pour désinstaller des applications sur macOS, utilise uniquement 'brew uninstall --cask'
+            - N'utilise jamais apt, apt-get ou d'autres gestionnaires Linux
+            - Mets les commandes entre ```
+            - Pas d'explications, juste la commande
+            -Pas d'explications supplémentaires ni de texte qui n'est pas demande 
+            - Si c'est une salutation, réponds simplement le plus court possible
+            - Si c'est une question, donne une réponse directe rien de plus
+            - Si c'est une demande de commande, donne uniquement la commande entre ```
+            - Pas de traduction ou d'explications linguistiques repond le plus petit possible"""
+
+            data = {
+                "model": "mistral",
+                "prompt": f"{system_prompt}\n\nUtilisateur: {prompt}",
+                "stream": False
+            }
+            
+            response = requests.post(OLLAMA_API_URL, json=data)
+            response.raise_for_status()
+            return response.json()["response"]
+        except requests.exceptions.ConnectionError:
+            return "Erreur: Ollama n'est pas en cours d'exécution"
+        except Exception as e:
+            return f"Erreur: {str(e)}"
+
+    def extract_commands(self, text: str) -> List[str]:
+        """Extrait les commandes du texte généré par l'IA"""
+        commands = re.findall(r'```(.*?)```', text, re.DOTALL)
+        if not commands:
+            commands = re.findall(r'`(.*?)`', text)
+        return [cmd.strip() for cmd in commands if cmd.strip()]
+
+    def is_greeting(self, text: str) -> bool:
+        """Vérifie si le texte est une salutation simple"""
+        greetings = {
+            'salut', 'bonjour', 'hello', 'hi', 'hey', 'coucou',
+            'bonsoir', 'yo', 'hola', 'ola'
+        }
+        return text.lower().strip() in greetings
+
+    def get_greeting_response(self, text: str) -> str:
+        """Retourne une réponse simple pour les salutations"""
+        return "Salut ! Comment puis-je vous aider ?"
 
 def interactive_mode():
     # Cette fonction n'est plus utilisée pour l'application GUI principale
