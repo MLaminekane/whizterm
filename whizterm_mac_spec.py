@@ -24,7 +24,7 @@ exe = EXE(
     pyz,
     a.scripts,
     [],
-    exclude_binaries=True,  # Important pour macOS
+    exclude_binaries=True,  
     name='WhizTerm',
     debug=False,
     bootloader_ignore_signals=False,
