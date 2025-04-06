@@ -11,19 +11,15 @@ import re
 import pathlib
 import logging
 import sys
-import io # Added for redirecting stdout/stderr
-import threading # Added for running commands in background
-import customtkinter # Added for GUI
-from typing import Optional, List # Added for type hints
+import io 
+import threading 
+import customtkinter 
+from typing import Optional, List 
 
-# --- Début des modifications pour PyInstaller ---
 def get_base_path():
-    # Détermine le chemin de base pour les ressources
     if getattr(sys, 'frozen', False):
-        # Si l'application est "gelée" (exécutée via PyInstaller)
         return sys._MEIPASS
     else:
-        # Sinon (exécutée comme un script normal)
         return os.path.dirname(os.path.abspath(__file__))
 
 base_path = get_base_path()
@@ -40,7 +36,6 @@ if os.path.exists(dotenv_path):
     print("[DEBUG] Fichier .env chargé.")
 else:
     print("[DEBUG] Fichier .env non trouvé au chemin attendu.")
-# --- Fin des modifications pour PyInstaller ---
 
 app = typer.Typer()
 
@@ -121,7 +116,7 @@ def find_cask_name(app_name: str, is_uninstall: bool = False) -> str:
     Trouve le nom exact du cask pour une application
     """
     try:
-        # Si c'est une désinstallation, vérifier d'abord si l'application est installée
+        # Si c'est une désinstallation on vérifie d'abord si l'application est installée
         if is_uninstall:
             check_cmd = f"brew list --cask | grep -i {app_name}"
             result = subprocess.run(check_cmd, shell=True, capture_output=True, text=True)
@@ -221,7 +216,7 @@ def process_command(
     Traite les commandes utilisateur avec l'IA Ollama
     """
     try:
-        # Préparation du prompt système
+        # prompt système
         system_prompt = """Tu es un assistant terminal AI qui aide à exécuter des commandes et gérer des fichiers.
         Tu peux aider à :
         - Rechercher des fichiers
@@ -305,7 +300,6 @@ class OutputRedirector(io.StringIO):
         self.text_widget = text_widget
 
     def write(self, string):
-        # Assurez-vous que les mises à jour du widget se font dans le thread principal
         self.text_widget.after(0, self._write_to_widget, string)
 
     def _write_to_widget(self, string):
@@ -315,7 +309,6 @@ class OutputRedirector(io.StringIO):
         self.text_widget.configure(state="disabled")
 
     def flush(self):
-        # Tkinter Text widget n'a pas besoin de flush explicite
         pass
 
 class App(customtkinter.CTk):
@@ -325,14 +318,13 @@ class App(customtkinter.CTk):
         self.title("WhizTerm")
         self.geometry("800x600")
         
-        # Configuration du thème sombre
+        # thème sombre
         customtkinter.set_appearance_mode("dark")
         customtkinter.set_default_color_theme("blue")
         
-        # Définir la couleur de fond en noir
+        # couleur de fond en noir
         self.configure(fg_color="black")
 
-        # Garder une trace du répertoire de travail courant
         self.current_directory = os.getcwd()
 
         # Ajouter le chemin de Homebrew au PATH
@@ -341,14 +333,14 @@ class App(customtkinter.CTk):
             os.environ["PATH"] = f"{homebrew_path}:{os.environ['PATH']}"
 
         self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(1, weight=1)  # La zone de texte principale prend plus d'espace
+        self.grid_rowconfigure(1, weight=1) 
 
         # Frame pour la zone de saisie en haut
         self.input_frame = customtkinter.CTkFrame(self, fg_color="black", corner_radius=0)
         self.input_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 0))
         self.input_frame.grid_columnconfigure(1, weight=1)
 
-        # Prompt du terminal (peut afficher le répertoire courant)
+        # Prompt du terminal 
         self.prompt_label = customtkinter.CTkLabel(
             self.input_frame,
             text="$ ",
@@ -369,7 +361,7 @@ class App(customtkinter.CTk):
         self.input_entry.grid(row=0, column=1, sticky="ew", padx=5)
         self.input_entry.bind("<Return>", self.process_gui_command)
 
-        # Zone de texte pour la sortie (occupe le reste de l'espace)
+        # Zone de texte pour la sortie 
         self.output_textbox = customtkinter.CTkTextbox(
             self,
             state="disabled",
@@ -398,7 +390,6 @@ class App(customtkinter.CTk):
         Exécute une commande shell en tenant compte du répertoire courant
         """
         try:
-            # Gérer la commande cd séparément car elle affecte l'état
             if command.startswith('cd'):
                 new_dir = command[2:].strip()
                 if not new_dir:
@@ -561,59 +552,40 @@ class App(customtkinter.CTk):
         """Retourne une réponse simple pour les salutations"""
         return "Salut ! Comment puis-je vous aider ?"
 
-def interactive_mode():
-    # Cette fonction n'est plus utilisée pour l'application GUI principale
-    print("[bold cyan]Bienvenue dans le mode interactif de WhizTerm.[/bold cyan]")
-    print("Entrez 'quitter' pour sortir.")
-    while True:
-        command_input = input("> ")
-        if command_input.lower() == 'quitter':
-            break
-        try:
-            # Simuler l'appel Typer. On pourrait rendre ça plus robuste
-            # mais pour un début, on assume que l'utilisateur entre 'process-command <sa commande>'
-            # ou une autre commande valide de WhizTerm.
-            # Attention: ne gère pas les options comme --model pour l'instant.
-            if command_input.strip():
-                # Diviser l'entrée en commande et arguments
-                parts = command_input.split(maxsplit=1)
-                cmd_name = parts[0]
-                args = parts[1] if len(parts) > 1 else ""
+# def interactive_mode():
+#     print("[bold cyan]Bienvenue dans le mode interactif de WhizTerm.[/bold cyan]")
+#     print("Entrez 'quitter' pour sortir.")
+#     while True:
+#         command_input = input("> ")
+#         if command_input.lower() == 'quitter':
+#             break
+#         try:
+#             if command_input.strip():
+#                 parts = command_input.split(maxsplit=1)
+#                 cmd_name = parts[0]
+#                 args = parts[1] if len(parts) > 1 else ""
+#                 typer_command = None
+#                 for command_info in app.registered_commands:
+#                     if command_info.name == cmd_name:
+#                         typer_command = command_info.callback
+#                         break
                 
-                # Trouver la fonction Typer correspondante
-                typer_command = None
-                for command_info in app.registered_commands:
-                    if command_info.name == cmd_name:
-                        typer_command = command_info.callback
-                        break
-                
-                if typer_command:
-                    # Ici, on appelle directement la fonction. 
-                    # Pour process_command, il faut passer l'argument 'command'.
-                    # Pour d'autres, il faut adapter.
-                    if cmd_name == 'process-command':
-                        process_command(command=args, model="mistral") 
-                    elif cmd_name == 'search-files':
-                        search_files(query=args)
-                    elif cmd_name == 'list-models':
-                        list_models()
-                    else:
-                        print(f"[bold red]Commande Typer non gérée en mode interactif: {cmd_name}[/bold red]")
-                else:
-                    # Si ce n'est pas une commande Typer, on tente de la traiter comme une commande AI
-                    process_command(command=command_input, model="mistral")
+#                 if typer_command:
+#                     if cmd_name == 'process-command':
+#                         process_command(command=args, model="mistral") 
+#                     elif cmd_name == 'search-files':
+#                         search_files(query=args)
+#                     elif cmd_name == 'list-models':
+#                         list_models()
+#                     else:
+#                         print(f"[bold red]Commande Typer non gérée en mode interactif: {cmd_name}[/bold red]")
+#                 else:
+#                     process_command(command=command_input, model="mistral")
             
-        except Exception as e:
-            print(f"[bold red]Erreur en mode interactif:[/bold red] {str(e)}")
+#         except Exception as e:
+#             print(f"[bold red]Erreur en mode interactif:[/bold red] {str(e)}")
 
 if __name__ == "__main__":
-    # Lancer l'application GUI
     gui_app = App()
     gui_app.mainloop()
     
-    # L'ancien code pour Typer ou le mode interactif n'est plus utilisé ici
-    # if len(sys.argv) <= 1:
-    #     interactive_mode()
-    # else:
-    #     # Sinon, laisser Typer gérer les arguments comme d'habitude
-    #     app()
