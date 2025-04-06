@@ -24,7 +24,7 @@ try:
     # Ici, importez et lancez votre application principale
     from whizterm import app
     
-    # Si l'application utilise typer, adaptez comme nécessaire
+    # Si l'application utilise typer
     if __name__ == "__main__":
         if len(sys.argv) <= 1:
             # Mode interactif
@@ -40,10 +40,9 @@ except Exception as e:
         log_file.write(f"\nERREUR: {str(e)}\n")
         log_file.write(traceback.format_exc())
         log_file.write("\n--- Fin du journal d'erreurs ---\n")
-    
-    # Afficher aussi l'erreur dans le terminal
+
     print(f"Une erreur s'est produite: {str(e)}")
     print(f"Détails de l'erreur enregistrés dans: {log_path}")
     
-    # Sortir avec un code d'erreur
+   
     sys.exit(1)
